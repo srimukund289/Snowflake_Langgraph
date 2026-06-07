@@ -202,11 +202,11 @@ See MULTI_WAREHOUSE_GUIDE.md for implementation details
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
 │  .env (Environment Variables)                                       │
-│  ├─ WAREHOUSE_TYPE=snowflake  ◄── Switch warehouse here            │
 │  ├─ SNOWFLAKE_ACCOUNT=...                                           │
+│  ├─ SNOWFLAKE_USER=...                                              │
+│  ├─ SNOWFLAKE_PASSWORD=...                                          │
 │  ├─ OPENAI_API_KEY=sk-...                                           │
-│  ├─ SEMANTIC_MODEL_PATH=semantic_model.yml                          │
-│  └─ [Other warehouse credentials...]                               │
+│  └─ SEMANTIC_MODEL_PATH=semantic_model.yml (optional)               │
 │                                                                      │
 │  semantic_model.yml (Business Context)                              │
 │  ├─ Table descriptions and synonyms                                 │
@@ -252,20 +252,9 @@ See MULTI_WAREHOUSE_GUIDE.md for implementation details
                    └──────────────────┘
 ```
 
-**Warehouse Selection at Runtime:**
+**Current Status:**
 
-```
-WAREHOUSE_TYPE environment variable
-        │
-        ├─ "snowflake"  → SnowflakeConnector
-        ├─ "bigquery"   → BigQueryConnector
-        ├─ "redshift"   → RedshiftConnector
-        ├─ "postgres"   → PostgreSQLConnector
-        └─ "mysql"      → MySQLConnector
-
-Change .env → Restart server → New warehouse active
-(No code changes needed)
-```
+This version is **production-ready for Snowflake**. Multi-warehouse support (BigQuery, Redshift, PostgreSQL, MySQL) is documented in the [Multi-Warehouse Extension Guide](./MULTI_WAREHOUSE_GUIDE.md) for future implementation.
 
 ---
 
@@ -276,9 +265,9 @@ Change .env → Restart server → New warehouse active
 | API | FastAPI + Uvicorn |
 | Agent Orchestration | LangGraph (StateGraph) |
 | LLM | OpenAI GPT-4o |
-| Semantic Context | YAML-based semantic model (auto-generated) |
+| Semantic Context | YAML-based semantic model (pre-built, human-edited; scaffold tool provided) |
 | MCP Server | FastMCP (in-process, no HTTP) |
-| Data Connectors | Snowflake, BigQuery, Redshift, PostgreSQL, MySQL (pluggable) |
+| Data Connectors | Snowflake (production-ready) |
 | Settings | Pydantic v2 + pydantic-settings + python-dotenv |
 | Logging | structlog (JSON structured) |
 | Retry Logic | tenacity (exponential backoff) |
@@ -296,8 +285,8 @@ Change .env → Restart server → New warehouse active
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/srimukund289/lanngraph_sf.git
-cd lanngraph_sf
+git clone https://github.com/srimukund289/Snowflake_Langgraph.git
+cd Snowflake_Langgraph
 ```
 
 ### Step 2: Set Up Medallion Architecture (Optional but Recommended)
