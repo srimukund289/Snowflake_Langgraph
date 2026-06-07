@@ -1,0 +1,41 @@
+# AI Data Analyst Agent - Dependencies
+# Snowflake access is via a local FastMCP server (tools/snowflake_mcp_server.py)
+# that wraps snowflake-connector-python — no remote Managed MCP endpoint needed.
+
+# Web framework
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+
+# LangGraph and LangChain
+langgraph>=0.2.0
+langchain-openai>=0.1.0
+langchain-core>=0.2.0
+
+# OpenAI
+openai>=1.30.0
+
+# FastMCP in-process client + server (includes mcp as a dependency)
+fastmcp>=2.0.0
+
+# Snowflake connector (used by tools/snowflake_mcp_server.py)
+snowflake-connector-python>=3.0.0
+
+# Data validation
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+
+# Retry logic
+tenacity>=8.3.0
+
+# Environment configuration
+python-dotenv>=1.0.0
+
+# Semantic model YAML parsing (semantic_model.yml / Cortex Analyst format)
+PyYAML>=6.0
+
+# Logging
+structlog>=24.1.0
+
+# Testing
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
