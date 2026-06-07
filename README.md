@@ -4,7 +4,7 @@
 
 No SQL knowledge required. No dashboards to maintain. No waiting for analysts. Just ask.
 
-> ⚠️ **OpenAI API Cost Notice:** This project uses OpenAI's GPT-4o model. Expected minimum cost: **$5 USD** for initial testing and development. Each query costs $0.005-$0.10 depending on token usage. Monitor your usage at https://platform.openai.com/account/billing/usage.
+> ⚠️ **OpenAI API Cost Notice:** This project uses OpenAI's GPT-5.4-mini model. Expected minimum cost: **$5 USD** for initial testing and development. Each query costs $0.005-$0.10 depending on token usage. Monitor your usage at https://platform.openai.com/account/billing/usage.
 
 > 📖 **Read the full Medium article:** [Beyond Cortex Analyst: Build a Portable AI Data Chatbot in 30 Minutes](https://medium.com/@mukund289/) — This is a follow-up to [Talk to Your Data: Snowflake MCP with VS Code Copilot](https://medium.com/@mukund289/talk-to-your-data-a-step-by-step-guide-to-connecting-snowflake-mcp-with-vs-code-copilot-f6e954fa795a)
 
@@ -23,7 +23,7 @@ This agent changes that: a single API call turns a plain-English question into a
 | Problem | This Agent Solves It |
 |---|---|
 | "We need an analyst to pull that data" | Anyone asks in plain English, gets an answer in seconds |
-| SQL expertise required for every query | GPT-4o writes, validates, and executes the SQL |
+| SQL expertise required for every query | gpt-5.4-mini writes, validates, and executes the SQL |
 | Stale dashboards miss new questions | Ad-hoc analysis on live Snowflake data, any time |
 | Reports take hours to write | 5-section executive markdown report, auto-generated |
 | Risk of accidental data modification | SQL validator enforces SELECT-only, blocks DDL/DML |
@@ -34,7 +34,7 @@ This agent changes that: a single API call turns a plain-English question into a
 
 ## Key Capabilities
 
-- **Natural language to SQL** — GPT-4o generates optimized, CTE-based Snowflake SQL from plain-English questions
+- **Natural language to SQL** — gpt-5.4-mini generates optimized, CTE-based Snowflake SQL from plain-English questions
 - **Automatic schema discovery** — the agent finds relevant tables itself; no manual configuration per query
 - **Safety-first SQL execution** — code-level validator blocks any non-SELECT statement before it reaches Snowflake
 - **9-node reasoning pipeline** — structured LangGraph workflow: intent extraction → planning → discovery → selection → SQL generation → validation → execution → analysis → reporting
@@ -264,7 +264,7 @@ This version is **production-ready for Snowflake**. Multi-warehouse support (Big
 |---|---|
 | API | FastAPI + Uvicorn |
 | Agent Orchestration | LangGraph (StateGraph) |
-| LLM | OpenAI GPT-4o |
+| LLM | OpenAI gpt-5.4-mini |
 | Semantic Context | YAML-based semantic model (pre-built, human-edited; scaffold tool provided) |
 | MCP Server | FastMCP (in-process, no HTTP) |
 | Data Connectors | Snowflake (production-ready) |
@@ -389,7 +389,7 @@ Set these environment variables in `.env` or your deployment environment.
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | Yes | OpenAI API key for GPT-4o |
+| `OPENAI_API_KEY` | Yes | OpenAI API key for gpt-5.4-mini |
 | `SNOWFLAKE_ACCOUNT` | Yes | Snowflake account identifier (e.g. `xy12345.us-east-1`) |
 | `SNOWFLAKE_USER` | Yes | Snowflake username |
 | `SNOWFLAKE_PASSWORD` | Yes | Snowflake password |
@@ -567,7 +567,7 @@ This auto-generates a YAML file with:
 - ✅ **Business synonyms** — Map "ARR", "annual revenue", "recurring revenue" → same column
 - ✅ **Measure vs. dimension classification** — "REVENUE is a measure (sum it), REGION is a dimension (filter it)"
 - ✅ **Auto-detected table relationships** — "ORDERS joins CUSTOMER on CUST_KEY"
-- ✅ **GPT-4o enrichment** — AI analyzes sample data to generate descriptions (optional, requires OPENAI_API_KEY)
+- ✅ **gpt-5.4-mini enrichment** — AI analyzes sample data to generate descriptions (optional, requires OPENAI_API_KEY)
 
 ### How It Works in the Pipeline
 
