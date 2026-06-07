@@ -1,8 +1,12 @@
-# AI Data Analyst Agent
+# AI Data Analyst Chatbot with LangGraph & Snowflake
 
-**Ask business questions in plain English. Get executive-ready analysis from your Snowflake data — in seconds.**
+**Build your own AI-powered data chatbot. Ask business questions in plain English. Get executive-ready analysis from your Snowflake data — in seconds.**
 
 No SQL knowledge required. No dashboards to maintain. No waiting for analysts. Just ask.
+
+> ⚠️ **OpenAI API Cost Notice:** This project uses OpenAI's GPT-4o model. Expected minimum cost: **$5 USD** for initial testing and development. Each query costs $0.005-$0.10 depending on token usage. Monitor your usage at https://platform.openai.com/account/billing/usage.
+
+> 📖 **Read the full Medium article:** [Beyond Cortex Analyst: Build a Portable AI Data Chatbot in 30 Minutes](https://medium.com/@mukund289/) — This is a follow-up to [Talk to Your Data: Snowflake MCP with VS Code Copilot](https://medium.com/@mukund289/talk-to-your-data-a-step-by-step-guide-to-connecting-snowflake-mcp-with-vs-code-copilot-f6e954fa795a)
 
 ---
 
@@ -44,80 +48,223 @@ This agent changes that: a single API call turns a plain-English question into a
 ## Architecture
 
 ```
-User
-  │
-  ▼
-POST /analyze  {"question": "Why did revenue drop in Q4?"}
-  │
-  ▼
-FastAPI (app.py)
-  │
-  ▼
-LangGraph StateGraph (graph/workflow.py)
-  │
-  ├── intent_node
-  ├── planner_node
-  ├── metadata_discovery_node  ──────────────────┐
-  ├── dataset_selector_node                       │
-  ├── sql_generator_node                          │
-  ├── sql_validator_node ──(fail)──► analyst_node │
-  ├── sql_executor_node                           │
-  ├── analyst_node                                │
-  └── response_node                               │
-                                                  │
-                          SnowflakeMCPClient       │
-                          (tools/mcp_client.py)   │
-                                  │               │
-                                  ▼               │
-                          FastMCP Server ◄─────────┘
-                    (tools/snowflake_mcp_server.py)
-                                  │
-                                  ▼
-                    snowflake-connector-python
-                                  │
-                                  ▼
-                            Snowflake ❄️
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         USER REQUEST                                    │
+│              {"question": "Why did revenue drop in Q4?"}               │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+                    ┌────────────────────────┐
+                    │   FastAPI (app.py)     │
+                    │  REST API Interface    │
+                    │  Request validation    │
+                    └────────────┬───────────┘
+                                 │
+                    ┌────────────┴──────────────┐
+                    │                           │
+                    ▼                           ▼
+           ┌──────────────────┐      ┌─────────────────────┐
+           │  Semantic Model  │      │ LangGraph Pipeline  │
+           │  (semantic_model.│      │  (graph/workflow.py)│
+           │   yml)           │      │  9-node orchestration
+           │                  │      │                     │
+           │ • Descriptions   │      │ [1] intent_node     │
+           │ • Synonyms       │      │ [2] planner_node    │
+           │ • Measures vs    │      │ [3] metadata_disc.  │
+           │   Dimensions     │      │ [4] dataset_select. │
+           │ • Relationships  │      │ [5] sql_generator   │
+           │                  │      │ [6] sql_validator   │
+           └────────┬─────────┘      │ [7] sql_executor    │
+                    │                │ [8] analyst_node    │
+                    │                │ [9] response_node   │
+                    └────────┬────────┴──────┬──────────────┘
+                             │               │
+                             └───────┬───────┘
+                                     │
+                        ┌────────────▼────────────┐
+                        │  Data Access Layer      │
+                        │  (tools/mcp_server.py)  │
+                        │  Warehouse-Agnostic     │
+                        └────────────┬────────────┘
+                                     │
+        ┌────────────────────────────┼────────────────────────────┐
+        │                            │                            │
+        ▼                            ▼                            ▼
+┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐
+│   SNOWFLAKE      │      │   BIGQUERY       │      │    REDSHIFT      │
+│  (configured)    │      │  (ready to add)  │      │  (ready to add)  │
+│                  │      │                  │      │                  │
+│ • Connect via    │      │ • BigQuery API   │      │ • redshift-conn  │
+│   snowflake-     │      │ • Service accts  │      │ • SQL access     │
+│   connector      │      │ • GCS/BQ storage │      │ • AWS integration│
+└──────────────────┘      └──────────────────┘      └──────────────────┘
+
+Additional warehouses supported: Databricks, PostgreSQL, MySQL, DuckDB
+See MULTI_WAREHOUSE_GUIDE.md for implementation details
 ```
+
+**Key Components:**
+
+- **Semantic Model**: YAML file with business terminology, synonyms, and metric definitions
+- **Data Access Layer**: Warehouse-agnostic connector pattern (switch with one `.env` variable)
+- **LangGraph Pipeline**: 9-node deterministic workflow with semantic context awareness
+- **Multiple Warehouses**: Built for Snowflake, ready to extend to BigQuery, Redshift, and others
 
 ---
 
 ## LangGraph Pipeline (9 Nodes)
 
 ```
- ┌─────────────────────────────────────────────────────────────────┐
- │                    LangGraph StateGraph                         │
- │                                                                 │
- │  [1] intent_node          GPT-4o extracts intent, metrics,     │
- │          │                dimensions, time period               │
- │          ▼                                                      │
- │  [2] planner_node         GPT-4o creates 4–7 step plan         │
- │          │                                                      │
- │          ▼                                                      │
- │  [3] metadata_discovery_node                                    │
- │          │                FastMCP → INFORMATION_SCHEMA          │
- │          ▼                                                      │
- │  [4] dataset_selector_node                                      │
- │          │                GPT-4o selects ≤5 relevant tables     │
- │          ▼                                                      │
- │  [5] sql_generator_node   GPT-4o generates CTE-based SQL       │
- │          │                                                      │
- │          ▼                                                      │
- │  [6] sql_validator_node   Code check: SELECT-only, no DDL/DML  │
- │          │                                                      │
- │    ┌─────┴──────┐                                               │
- │   PASS        FAIL                                              │
- │    │            └──────────────────────┐                        │
- │    ▼                                   │                        │
- │  [7] sql_executor_node                 │                        │
- │    FastMCP → Snowflake                 │                        │
- │    rows + columns returned             │                        │
- │          │                             │                        │
- │          ▼                             ▼                        │
- │  [8] analyst_node         GPT-4o: findings, anomalies,         │
- │          │                key metrics (error-aware)             │
- │          ▼                                                      │
- │  [9] response_node        GPT-4o: 5-section executive report   │
- └─────────────────────────────────────────────────────────────────┘
+ ╔═══════════════════════════════════════════════════════════════════════╗
+ ║                 LangGraph StateGraph (9-Node Pipeline)               ║
+ ║                   Semantic-Aware, Warehouse-Agnostic                ║
+ ╠═══════════════════════════════════════════════════════════════════════╣
+ ║                                                                       ║
+ ║  ┌─ INPUTS ───────────────────────────────────────────────────────┐  ║
+ ║  │ • User question                                               │  ║
+ ║  │ • Semantic model (synonyms, metric definitions, rules)       │  ║
+ ║  │ • Database schema (auto-discovered)                          │  ║
+ ║  └─────────────────────────────────────────────────────────────┘  ║
+ ║                          │                                          ║
+ ║                          ▼                                          ║
+ ║  [1] intent_node        Extract: intent, metrics, dimensions,      ║
+ ║          │              time period. Uses semantic synonyms.       ║
+ ║          │              (E.g., "ARR" → "Annual_Revenue")          ║
+ ║          ▼                                                          ║
+ ║  [2] planner_node       Create 4–7 step analytical plan            ║
+ ║          │              based on intent + semantic context.        ║
+ ║          ▼                                                          ║
+ ║  [3] metadata_discovery  Scan INFORMATION_SCHEMA via MCP          ║
+ ║          │              (warehouse-agnostic: Snowflake,           ║
+ ║          │               BigQuery, Redshift, PostgreSQL, etc.)    ║
+ ║          ▼                                                          ║
+ ║  [4] dataset_selector   Select ≤5 relevant tables.                ║
+ ║          │              Knows relationships from semantic model.  ║
+ ║          ▼                                                          ║
+ ║  [5] sql_generator      Generate CTE-based SQL.                   ║
+ ║          │              Informed by semantic descriptions.        ║
+ ║          ▼                                                          ║
+ ║  [6] sql_validator      Code check: SELECT-only, no DDL/DML       ║
+ ║          │              Table whitelist validation                │
+ ║    ┌─────┴─────────┐                                              ║
+ ║   PASS           FAIL                                              ║
+ ║    │              │                                               ║
+ ║    │              └──────────────────────────┐                   ║
+ ║    ▼                                         │                   ║
+ ║  [7] sql_executor       Execute via warehouse connector            ║
+ ║          │              • Snowflake: snowflake-connector-python  ║
+ ║          │              • BigQuery: google-cloud-bigquery        ║
+ ║          │              • Redshift: redshift-connector            ║
+ ║          │              Returns: rows + columns (max 1000)       ║
+ ║          │                                                         ║
+ ║          ├─────────────────────────────────────┐                 ║
+ ║          │                                     │                 ║
+ ║          ▼                                     ▼                 ║
+ ║  [8] analyst_node       Generate findings: key metrics,           ║
+ ║          │              anomalies, trends. Handles errors too.   ║
+ ║          │              Interprets results using semantic defs.  ║
+ ║          │                                                         ║
+ ║          ▼                                                         ║
+ ║  [9] response_node      5-section executive markdown report:      ║
+ ║          │              Summary, Findings, Data, Anomalies,      ║
+ ║          │              Recommendations (business-friendly)      ║
+ ║          ▼                                                         ║
+ ║  ┌─ OUTPUTS ──────────────────────────────────────────────────┐  ║
+ ║  │ • answer: 5-section markdown executive report              │  ║
+ ║  │ • analysis: detailed findings with metrics                 │  ║
+ ║  │ • sql: the validated, executed query                       │  ║
+ ║  │ • tables: list of tables queried                           │  ║
+ ║  │ • intent: extracted business intent                        │  ║
+ ║  │ • plan: step-by-step investigation plan                    │  ║
+ ║  │ • processing_time_ms: total execution time                 │  ║
+ ║  └────────────────────────────────────────────────────────────┘  ║
+ ║                                                                   ║
+ ╚═══════════════════════════════════════════════════════════════════════╝
+```
+
+**Pipeline Design Principles:**
+
+- **Deterministic**: Same path every execution (no looping agents)
+- **Observable**: Every node logged with timestamps and durations
+- **Safe**: SQL validated before execution, no DDL/DML allowed
+- **Semantic-Aware**: Uses business context from `semantic_model.yml`
+- **Warehouse-Agnostic**: Connectors plugged in via `.env` configuration
+- **Resilient**: Exponential backoff retry on transient failures
+- **Traceable**: Full execution log for audit trails and debugging
+
+---
+
+## Configuration & Runtime Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          CONFIGURATION                              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  .env (Environment Variables)                                       │
+│  ├─ WAREHOUSE_TYPE=snowflake  ◄── Switch warehouse here            │
+│  ├─ SNOWFLAKE_ACCOUNT=...                                           │
+│  ├─ OPENAI_API_KEY=sk-...                                           │
+│  ├─ SEMANTIC_MODEL_PATH=semantic_model.yml                          │
+│  └─ [Other warehouse credentials...]                               │
+│                                                                      │
+│  semantic_model.yml (Business Context)                              │
+│  ├─ Table descriptions and synonyms                                 │
+│  ├─ Column definitions (measures vs. dimensions)                    │
+│  ├─ Metric formulas and healthy ranges                              │
+│  ├─ Business rules and definitions                                  │
+│  └─ Auto-generated via: tools/generate_semantic_model.py           │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+        │
+        ├──────────────┬──────────────┬──────────────┐
+        │              │              │              │
+        ▼              ▼              ▼              ▼
+   ┌─────────┐  ┌──────────┐  ┌───────────┐  ┌──────────┐
+   │Semantic │  │Warehouse │  │LangGraph  │  │FastAPI   │
+   │Model    │  │Selector  │  │Pipeline   │  │Server    │
+   │Loader   │  │(.env)    │  │(9 nodes)  │  │(Routes)  │
+   └────┬────┘  └────┬─────┘  └─────┬─────┘  └────┬─────┘
+        │            │              │             │
+        └────────────┼──────────────┼─────────────┘
+                     │              │
+                     ▼              ▼
+              ┌─────────────────────────┐
+              │  Request Processing     │
+              │  (Semantic + Warehouse) │
+              │                         │
+              │  1. Load semantic model │
+              │  2. Select connector    │
+              │  3. Run pipeline        │
+              │  4. Generate response   │
+              └────────────┬────────────┘
+                           │
+                           ▼
+                   ┌──────────────────┐
+                   │   Response JSON  │
+                   ├──────────────────┤
+                   │ • answer         │
+                   │ • analysis       │
+                   │ • sql            │
+                   │ • tables         │
+                   │ • intent         │
+                   │ • plan           │
+                   └──────────────────┘
+```
+
+**Warehouse Selection at Runtime:**
+
+```
+WAREHOUSE_TYPE environment variable
+        │
+        ├─ "snowflake"  → SnowflakeConnector
+        ├─ "bigquery"   → BigQueryConnector
+        ├─ "redshift"   → RedshiftConnector
+        ├─ "postgres"   → PostgreSQLConnector
+        └─ "mysql"      → MySQLConnector
+
+Change .env → Restart server → New warehouse active
+(No code changes needed)
 ```
 
 ---
@@ -129,9 +276,10 @@ LangGraph StateGraph (graph/workflow.py)
 | API | FastAPI + Uvicorn |
 | Agent Orchestration | LangGraph (StateGraph) |
 | LLM | OpenAI GPT-4o |
+| Semantic Context | YAML-based semantic model (auto-generated) |
 | MCP Server | FastMCP (in-process, no HTTP) |
-| Data Warehouse | Snowflake via snowflake-connector-python |
-| Settings | Pydantic v2 + pydantic-settings |
+| Data Connectors | Snowflake, BigQuery, Redshift, PostgreSQL, MySQL (pluggable) |
+| Settings | Pydantic v2 + pydantic-settings + python-dotenv |
 | Logging | structlog (JSON structured) |
 | Retry Logic | tenacity (exponential backoff) |
 | Python | 3.10+ |
@@ -140,35 +288,77 @@ LangGraph StateGraph (graph/workflow.py)
 
 ## 🚀 Quick Start
 
-**Prerequisites:** Python 3.10+, a Snowflake account, an OpenAI API key.
+**Prerequisites:** 
+- Python 3.10+ 
+- Snowflake account with database access
+- OpenAI API key (with at least $5 USD in credits for testing)
 
-### 1. Clone the repository
+### Step 1: Clone the Repository
 
 ```bash
 git clone https://github.com/srimukund289/lanngraph_sf.git
 cd lanngraph_sf
 ```
 
-### 2. Install dependencies
+### Step 2: Set Up Medallion Architecture (Optional but Recommended)
+
+Create a gold-layer data product in your Snowflake account using the provided SQL script:
+
+```bash
+# Open the SQL file in your Snowflake UI or execute via SnowSQL
+snowsql -c your_snowflake_connection < create_data_medallion.sql
+```
+
+This creates:
+- **TPCH_DATA_PRODUCT** database
+- **CURATED** schema (silver layer): cleaned and joined base tables
+- **GOLD** schema: business-ready aggregates
+
+See **[Medallion Architecture Setup](#medallion-architecture-guide)** section below for details.
+
+### Step 3: Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Configure environment variables
+### Step 4: Configure Environment Variables
 
 ```bash
 cp .env.example .env
-# Edit .env with your credentials
 ```
 
-### 4. Start the server
+Edit `.env` with your credentials:
+
+```env
+# OpenAI Configuration
+OPENAI_API_KEY=sk-your-key-here
+
+# Snowflake Configuration
+SNOWFLAKE_ACCOUNT=xy12345.us-east-1
+SNOWFLAKE_USER=your_username
+SNOWFLAKE_PASSWORD=your_password
+SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+SNOWFLAKE_DATABASE=TPCH_DATA_PRODUCT
+SNOWFLAKE_SCHEMA=GOLD
+SNOWFLAKE_ROLE=ANALYST_ROLE
+```
+
+### Step 5: Start the Server
 
 ```bash
 uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 5. Ask your first question
+You should see:
+```
+INFO:     Uvicorn running on http://0.0.0.0:8000
+INFO:     Press CTRL+C to quit
+```
+
+### Step 6: Test Your Chatbot
+
+Open a new terminal and ask your first question:
 
 ```bash
 curl -X POST http://localhost:8000/analyze \
@@ -176,7 +366,31 @@ curl -X POST http://localhost:8000/analyze \
   -d '{"question": "What are the total orders in 1996?"}'
 ```
 
-API docs available at: http://localhost:8000/docs
+**Expected response:**
+```json
+{
+  "answer": "## Executive Summary\n\nThere were **152,343 orders** placed in 1996...",
+  "analysis": "Order volume shows consistent distribution with Q4 uptick...",
+  "sql": "SELECT COUNT(*) AS total_orders FROM ...",
+  "tables": ["TPCH_DATA_PRODUCT.GOLD.SALES_BY_REGION_MONTH"],
+  "intent": "Order Volume Analysis",
+  "plan": ["Identify tables", "Count orders", "Analyze trends"],
+  "processing_time_ms": 4821.33
+}
+```
+
+### Step 7: Explore the API
+
+Interactive API docs are available at:
+```
+http://localhost:8000/docs
+```
+
+Try these example questions directly in the Swagger UI:
+- "Which regions had the highest revenue in 1996?"
+- "What is the average order value by customer segment?"
+- "Show me the top 10 customers by lifetime value."
+- "Which products had the highest return rate?"
 
 ---
 
@@ -336,6 +550,232 @@ All tools run in-process — no remote HTTP server required.
 
 ---
 
+## Semantic Model: Teaching the Agent Your Business Language
+
+### The Problem It Solves
+
+When you ask the chatbot "What was our ARR last quarter?", it needs to know:
+- **What "ARR" means** — is it "Annual Recurring Revenue"? which column stores it?
+- **Where to find it** — which table? which database?
+- **How to calculate it** — is it a measure (sum/avg) or a dimension (filter/group)?
+- **How tables connect** — if you ask about customers AND revenue, which column joins them?
+
+Without this context, the LLM has to guess—leading to wrong tables, missing JOINs, and incorrect results.
+
+### What Gets Generated
+
+The **semantic model** is a pre-built YAML file that encodes your data dictionary once, then reuses it across all queries. Generate it automatically:
+
+```bash
+python tools/generate_semantic_model.py \
+    --database TPCH_DATA_PRODUCT \
+    --schema GOLD \
+    --output semantic_model.yml
+```
+
+This auto-generates a YAML file with:
+- ✅ **Table and column descriptions** — "What does CUSTOMER_LIFETIME_VALUE measure?"
+- ✅ **Business synonyms** — Map "ARR", "annual revenue", "recurring revenue" → same column
+- ✅ **Measure vs. dimension classification** — "REVENUE is a measure (sum it), REGION is a dimension (filter it)"
+- ✅ **Auto-detected table relationships** — "ORDERS joins CUSTOMER on CUST_KEY"
+- ✅ **GPT-4o enrichment** — AI analyzes sample data to generate descriptions (optional, requires OPENAI_API_KEY)
+
+### How It Works in the Pipeline
+
+Every query flows through the semantic model:
+
+```
+User asks: "Which regions grew most?"
+                │
+                ▼
+   [1] intent_node
+   Uses semantic synonyms to normalize: "regions" → REGION dimension
+                │
+                ▼
+   [4] dataset_selector_node
+   Uses semantic table descriptions to pick SALES_BY_REGION_MONTH
+   (instead of guessing ORDERS, CUSTOMERS, PRODUCTS)
+                │
+                ▼
+   [5] sql_generator_node
+   Uses semantic relationships to auto-write JOINs
+   (knows SALES_BY_REGION_MONTH is already aggregated)
+```
+
+### The Cost of Skipping This
+
+**Without semantic model:**
+- LLM guesses table names → wrong results
+- LLM misses JOIN conditions → NULL values or cartesian products
+- Synonyms not recognized → "What is ARR?" fails
+
+**With semantic model:**
+- Deterministic table selection based on business intent
+- Pre-verified relationships → correct SQL every time
+- Synonyms teach the LLM your terminology
+
+### Setup Steps
+
+**Step 1: Generate the model** (requires Snowflake credentials in `.env`)
+
+```bash
+python tools/generate_semantic_model.py \
+    --database TPCH_DATA_PRODUCT \
+    --schema GOLD \
+    --output semantic_model.yml
+```
+
+**Step 2: Review and customize** (edit the YAML to add your own descriptions)
+
+```yaml
+tables:
+  - name: SALES_BY_REGION_MONTH
+    description: "Monthly revenue aggregated by geographic region"
+    synonyms: [revenue_by_region, regional_sales, geography_sales]
+    columns:
+      - name: REVENUE
+        description: "Total net revenue for the month"
+        synonyms: [sales, total_sales, net_revenue]
+        is_measure: true
+        is_dimension: false
+      - name: REGION
+        description: "Geographic region (US, EMEA, APAC, LATAM)"
+        synonyms: [geography, territory, area]
+        is_measure: false
+        is_dimension: true
+```
+
+**Step 3: Enable in `.env`**
+
+```env
+SEMANTIC_MODEL_PATH=semantic_model.yml
+```
+
+**Step 4: Restart the server** and test
+
+```bash
+uvicorn app:app --reload
+```
+
+### Auto-Discovery Feature
+
+If you DON'T set `SEMANTIC_MODEL_PATH`, the system will auto-discover all `*_semantic_model.yml` files and merge them. Perfect for multi-database setups:
+
+```
+semantic_model__TPCH_DATA_PRODUCT__GOLD.yml  ← discovered and merged
+semantic_model__ANALYTICS__STAGING.yml       ← discovered and merged
+semantic_model__FINANCE__LEDGER.yml          ← discovered and merged
+```
+
+The LLM can now query across all three databases intelligently.
+
+**Full guide with examples** available in [SEMANTIC_MODEL_GUIDE.md](./SEMANTIC_MODEL_GUIDE.md) — explains how the semantic model flows through the pipeline, the four-step setup process, and real-world examples.
+
+---
+
+## Medallion Architecture Guide
+
+The `create_data_medallion.sql` file implements a three-layer medallion architecture in Snowflake, ideal for analytical workloads:
+
+### Layer 1: Bronze (Raw)
+- Source data from SNOWFLAKE_SAMPLE_DATA (TPCH dataset)
+- No transformations — stores data as-is
+- In production, this would be files ingested from AWS S3, Google Cloud Storage, or other sources
+
+### Layer 2: Curated (Silver)
+Located in `TPCH_DATA_PRODUCT.CURATED` schema:
+- **DIM_CUSTOMER**: Cleaned customer data with region and nation information
+- **DIM_SUPPLIER**: Supplier details enriched with geographic data
+- **DIM_PART**: Product dimension with pricing
+- **FCT_ORDER_LINEITEM**: Order facts with calculated fields (net_amount, total_amount)
+
+**Why Curated?** 
+- Removes duplicates, nulls, and data quality issues
+- Joins dimensional tables for context
+- Adds calculated fields (net revenue, tax-included total)
+- Single source of truth for analysts
+
+### Layer 3: Gold (Refined)
+Located in `TPCH_DATA_PRODUCT.GOLD` schema:
+- **SALES_BY_REGION_MONTH**: Regional sales aggregates by month
+- **CUSTOMER_LIFETIME_VALUE**: Customer profitability metrics (LTV, tenure, order count)
+- **SUPPLIER_PERFORMANCE**: Supplier KPIs (delivery delays, return rates)
+- **PRODUCT_SALES_SUMMARY**: Product performance metrics
+- **SHIPPING_ANALYSIS**: Logistics insights (transit times, late delivery rates)
+
+**Why Gold?**
+- Business-ready aggregates, no SQL knowledge needed
+- Optimized for BI tools and self-service analytics
+- Pre-computed KPIs reduce query latency
+- Perfect for the AI agent to query
+
+### How to Deploy
+
+1. **In Snowflake UI (simplest):**
+   - Open `create_data_medallion.sql` in Snowflake Web UI
+   - Run all statements
+   - Takes ~2 minutes with XSMALL warehouse
+
+2. **Via Command Line:**
+   ```bash
+   snowsql -c your_connection -f create_data_medallion.sql
+   ```
+
+3. **In Your Application:**
+   ```python
+   from snowflake.connector import connect
+   
+   conn = connect(
+       user='your_user',
+       password='your_pass',
+       account='xy12345.us-east-1'
+   )
+   
+   with open('create_data_medallion.sql') as f:
+       sql = f.read()
+       for statement in sql.split(';'):
+           if statement.strip():
+               conn.cursor().execute(statement)
+   conn.close()
+   ```
+
+### Sample Queries Against Gold Layer
+
+Once the schema is created, the agent can answer questions like:
+
+```
+"What is the revenue trend by region for Q4?"
+→ Query: SALES_BY_REGION_MONTH where SALES_MONTH = Q4
+
+"Which customers are our most valuable?"
+→ Query: CUSTOMER_LIFETIME_VALUE order by LIFETIME_NET_REVENUE
+
+"What is the average shipping delay?"
+→ Query: SHIPPING_ANALYSIS calculate avg late delivery %
+
+"Which suppliers have the highest quality?"
+→ Query: SUPPLIER_PERFORMANCE where RETURN_RATE_PCT is low
+```
+
+---
+
+## Multi-Warehouse Support
+
+This chatbot currently works with **Snowflake** out-of-the-box. To add support for other data warehouses:
+
+| Warehouse | Status | Time | Guide |
+|---|---|---|---|
+| **Snowflake** | ✅ Built-in | — | Included |
+| **BigQuery** | 📋 Ready | 30 min | [Multi-Warehouse Guide](./MULTI_WAREHOUSE_GUIDE.md) |
+| **Databricks** | 📋 Ready | 30 min | [Multi-Warehouse Guide](./MULTI_WAREHOUSE_GUIDE.md) |
+| **AWS Redshift** | 📋 Ready | 30 min | [Multi-Warehouse Guide](./MULTI_WAREHOUSE_GUIDE.md) |
+| **PostgreSQL** | 📋 Ready | 15 min | [Multi-Warehouse Guide](./MULTI_WAREHOUSE_GUIDE.md) |
+| **MySQL** | 📋 Ready | 15 min | [Multi-Warehouse Guide](./MULTI_WAREHOUSE_GUIDE.md) |
+
+See **[Multi-Warehouse Extension Guide](./MULTI_WAREHOUSE_GUIDE.md)** for complete step-by-step instructions.
+
+---
+
 ## Roadmap
 
 | Feature | Status |
@@ -343,12 +783,14 @@ All tools run in-process — no remote HTTP server required.
 | Core 9-node LangGraph pipeline | Done |
 | FastMCP Snowflake integration | Done |
 | FastAPI REST interface | Done |
+| Medallion architecture SQL setup | Done |
+| Multi-warehouse connectors (templates) | Done |
 | Multi-agent orchestration (sub-agents per domain) | Planned |
 | Streamlit UI for business users | Planned |
 | React + TypeScript frontend | Planned |
 | Data Quality Agent (anomaly detection, drift alerts) | Planned |
 | Query result caching layer | Planned |
-| Support for additional warehouses (BigQuery, Redshift) | Planned |
+| Real-time multi-warehouse federation | Planned |
 
 ---
 
